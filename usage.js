@@ -29,7 +29,7 @@ export function pace({pct, resetsAt, windowMs}, now) {
     const start = resetsAt - windowMs;
     const elapsed = Math.min(Math.max(now - start, 0), windowMs);
     const elapsedPct = Math.round(elapsed / windowMs * 100);
-    // ponytail: linear extrapolation from window start, noisy in the first minutes; skipped below 5% elapsed
+    // Linear extrapolation from window start; too noisy in the first 5% of the window, so skipped there.
     let hitAt = null;
     if (pct > 0 && elapsed >= windowMs * 0.05 && start + elapsed * 100 / pct < resetsAt)
         hitAt = start + elapsed * 100 / pct;

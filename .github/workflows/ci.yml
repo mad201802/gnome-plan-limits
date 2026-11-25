@@ -1,0 +1,19 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+
+jobs:
+  test:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - run: sudo apt-get update && sudo apt-get install -y gjs
+      - run: gjs -m test.js
+      - run: zip -r plan-limits@mad201802.github.io.shell-extension.zip metadata.json extension.js usage.js stylesheet.css icons LICENSE
+      - uses: actions/upload-artifact@v4
+        with:
+          name: shell-extension
+          path: plan-limits@mad201802.github.io.shell-extension.zip

@@ -23,13 +23,16 @@ const CREDS = GLib.build_filenamev([GLib.get_home_dir(), '.claude', '.credential
 const POLL_S = 300;
 const CLI_THROTTLE = 15 * MIN;
 
-// Plain data at module scope: the shell disables extensions while the screen is locked,
-// so this keeps last values, 429 backoff, CLI state and notification levels across unlocks.
-const state = {data: null, updatedAt: 0, error: null, retryAt: 0, backoff: 0, cliAt: 0, cliRunning: false, notified: {}};
-
 const decode = bytes => new TextDecoder().decode(bytes);
 
-export default class ClaudeUsageExtension extends Extension {
+export default class PlanLimitsExtension extends Extension {
+    constructor(metadata) {
+        super(metadata);
+        // Plain data only. The shell disables extensions while the screen is locked; keeping this
+        // on the instance preserves last values, 429 backoff, CLI state and notification levels across unlocks.
+        this._state = {data: null, updatedAt: 0, error: null, retryAt: 0, backoff: 0, cliAt: 0, cliRunning: false, notified: {}};
+    }
+
     enable() {
         this._session = new Soup.Session({user_agent: `gnome-plan-limits/${this.metadata['version-name']}`, timeout: 15});
         this._cancellable = new Gio.Cancellable();
@@ -86,7 +89,7 @@ export default class ClaudeUsageExtension extends Extension {
     }
 
     _refreshIfStale() {
-        if (Date.now() - state.updatedAt > MIN)
+        if (Date.now() - this._state.updatedAt > MIN)
             this._refresh();
     }
 
@@ -103,13 +106,13 @@ export default class ClaudeUsageExtension extends Extension {
 
     // Never refreshes or writes the OAuth token itself; an expired token is handed to the CLI.
     async _refresh(manual = false) {
-        if (this._busy || !this._indicator || (!manual && Date.now() < state.retryAt))
+        if (this._busy || !this._indicator || (!manual && Date.now() < this._state.retryAt))
             return;
         this._busy = true;
         try {
             const creds = await this._readCreds();
             if (!creds?.accessToken) {
-                state.error = 'Not logged in: run claude';
+                this._state.error = 'Not logged in: run claude';
                 return;
             }
             if (creds.expiresAt - Date.now() < MIN) {
@@ -122,25 +125,25 @@ export default class ClaudeUsageExtension extends Extension {
             const bytes = await this._session.send_and_read_async(msg, GLib.PRIORITY_DEFAULT, this._cancellable);
             const status = msg.get_status();
             if (status === 200) {
-                state.data = parseUsage(JSON.parse(decode(bytes.get_data())));
-                state.updatedAt = Date.now();
-                state.error = null;
-                state.backoff = state.retryAt = 0;
+                this._state.data = parseUsage(JSON.parse(decode(bytes.get_data())));
+                this._state.updatedAt = Date.now();
+                this._state.error = null;
+                this._state.backoff = this._state.retryAt = 0;
                 this._notify(true);
             } else if (status === 401) {
                 this._cliRefresh(manual);
             } else if (status === 429) {
                 const retryAfter = Number(msg.response_headers.get_one('retry-after'));
-                state.backoff = Math.min(state.backoff ? state.backoff * 2 : 5, 60);
-                state.retryAt = Date.now() + (retryAfter > 0 ? retryAfter * 1000 : state.backoff * MIN);
-                state.error = `Rate limited, retry at ${this._time(state.retryAt)}`;
+                this._state.backoff = Math.min(this._state.backoff ? this._state.backoff * 2 : 5, 60);
+                this._state.retryAt = Date.now() + (retryAfter > 0 ? retryAfter * 1000 : this._state.backoff * MIN);
+                this._state.error = `Rate limited, retry at ${this._time(this._state.retryAt)}`;
             } else {
-                state.error = `Server error (HTTP ${status})`;
+                this._state.error = `Server error (HTTP ${status})`;
             }
         } catch (e) {
             if (e.matches?.(Gio.IOErrorEnum, Gio.IOErrorEnum.CANCELLED))
                 return;
-            state.error = `Fetch failed: ${e.message}`;
+            this._state.error = `Fetch failed: ${e.message}`;
         } finally {
             this._busy = false;
             this._render();
@@ -150,8 +153,8 @@ export default class ClaudeUsageExtension extends Extension {
     // Lets the official CLI refresh the token (it locks + rewrites the credentials file itself).
     // `/usage` is a local command: no model call, no quota used, no transcript with --no-session-persistence.
     _cliRefresh(manual) {
-        if (state.cliRunning || (!manual && Date.now() - state.cliAt < CLI_THROTTLE)) {
-            state.error ??= 'Token expired: open Claude Code';
+        if (this._state.cliRunning || (!manual && Date.now() - this._state.cliAt < CLI_THROTTLE)) {
+            this._state.error ??= 'Token expired: open Claude Code';
             return;
         }
         const claude = GLib.find_program_in_path('claude') ??
@@ -165,24 +168,24 @@ export default class ClaudeUsageExtension extends Extension {
         try {
             proc = launcher.spawnv([claude, '-p', '/usage', '--safe-mode', '--no-session-persistence']);
         } catch (e) {
-            state.error = `Cannot run claude: ${e.message}`;
+            this._state.error = `Cannot run claude: ${e.message}`;
             return;
         }
-        state.cliRunning = true;
-        state.cliAt = Date.now();
-        state.error = 'Token expired, refreshing via claude CLI…';
+        this._state.cliRunning = true;
+        this._state.cliAt = Date.now();
+        this._state.error = 'Token expired, refreshing via claude CLI…';
         // No cancellable: completion must clear cliRunning even if disabled meanwhile.
         proc.wait_async(null).catch(() => {}).then(() => this._afterCli());
     }
 
     async _afterCli() {
-        state.cliRunning = false;
+        this._state.cliRunning = false;
         if (!this._indicator)
             return;
         try {
             const creds = await this._readCreds();
             if (!creds?.accessToken || creds.expiresAt - Date.now() < MIN) {
-                state.error = 'Logged out: run claude, then /login';
+                this._state.error = 'Logged out: run claude, then /login';
                 this._render();
                 return;
             }
@@ -190,14 +193,14 @@ export default class ClaudeUsageExtension extends Extension {
             if (!this._indicator)
                 return;
         }
-        state.error = null;
+        this._state.error = null;
         this._refresh(true);
     }
 
     _onTick() {
         const now = Date.now();
         // Refetch once right after a window resets instead of waiting for the next poll.
-        if (state.data?.some(l => l.resetsAt !== null && now >= l.resetsAt && state.updatedAt < l.resetsAt))
+        if (this._state.data?.some(l => l.resetsAt !== null && now >= l.resetsAt && this._state.updatedAt < l.resetsAt))
             this._refresh();
         this._notify(false);
         this._render();
@@ -205,7 +208,7 @@ export default class ClaudeUsageExtension extends Extension {
 
     _notify(fresh) {
         const now = Date.now();
-        for (const {limit: l, reset} of notifications(state.notified, state.data ?? [], now, fresh)) {
+        for (const {limit: l, reset} of notifications(this._state.notified, this._state.data ?? [], now, fresh)) {
             if (reset)
                 Main.notify(`Claude ${l.key} limit reset`, 'Full quota available again.');
             else
@@ -231,27 +234,27 @@ export default class ClaudeUsageExtension extends Extension {
             return;
         const now = Date.now();
         const pctText = l => l?.pct === null || l?.pct === undefined ? '–' : `${l.pct}%`;
-        const [s, w] = state.data ?? [];
-        this._sessionLabel.text = state.data
+        const [s, w] = this._state.data ?? [];
+        this._sessionLabel.text = this._state.data
             ? pctText(s) + (s.resetsAt > now ? ` (${fmtDuration(s.resetsAt - now, true)})` : '') : '…';
-        this._weeklyLabel.text = state.data ? pctText(w) : '…';
+        this._weeklyLabel.text = this._state.data ? pctText(w) : '…';
         this._sessionLabel.style_class = levelClass(s?.pct);
         this._weeklyLabel.style_class = levelClass(w?.pct);
-        this._warnLabel.visible = !!state.error;
+        this._warnLabel.visible = !!this._state.error;
         for (const l of [this._sessionLabel, this._weeklyLabel])
-            l.opacity = state.error ? 128 : 255;
+            l.opacity = this._state.error ? 128 : 255;
 
         const menu = this._indicator.menu;
         menu.removeAll();
-        for (const l of state.data ?? [])
+        for (const l of this._state.data ?? [])
             this._addLimit(menu, l, now);
         menu.addMenuItem(new PopupMenu.PopupSeparatorMenuItem());
-        if (state.error)
-            this._addRow(menu, `⚠ ${state.error}`);
+        if (this._state.error)
+            this._addRow(menu, `⚠ ${this._state.error}`);
         const refresh = new PopupMenu.PopupMenuItem('Refresh now');
-        if (state.updatedAt) {
+        if (this._state.updatedAt) {
             refresh.add_child(new St.Label({
-                text: `Updated ${this._time(state.updatedAt)}`,
+                text: `Updated ${this._time(this._state.updatedAt)}`,
                 x_expand: true, x_align: Clutter.ActorAlign.END, opacity: 160,
             }));
         }
