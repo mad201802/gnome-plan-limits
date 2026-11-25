@@ -1,0 +1,5 @@
+.cu-warn { color: #f6d32d; }
+.cu-crit { color: #ff7b63; }
+.cu-row { padding-top: 2px; padding-bottom: 2px; }
+.cu-bar { width: 260px; height: 6px; }
+.cu-title { font-weight: bold; padding-top: 8px; }

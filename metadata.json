@@ -1,0 +1,8 @@
+{
+  "uuid": "plan-limits@mad201802.github.io",
+  "name": "Plan Limits Meter",
+  "description": "Unofficial top-bar meter for Claude Code session and weekly plan limits. Reads the local Claude Code login read-only and never refreshes the token itself. Not affiliated with Anthropic.",
+  "shell-version": ["45", "46", "47", "48", "49", "50"],
+  "url": "https://github.com/mad201802/gnome-plan-limits",
+  "version-name": "1.0"
+}
