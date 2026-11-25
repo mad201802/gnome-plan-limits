@@ -20,6 +20,8 @@ Requires a logged-in [Claude Code](https://code.claude.com) CLI.
     gjs -m test.js
     dbus-run-session -- gnome-shell --devkit --wayland   # GNOME 49+, needs mutter-devkit; older: --nested
     journalctl --user -f -o cat /usr/bin/gnome-shell
+    # package for extensions.gnome.org
+    gnome-extensions pack . --extra-source=usage.js --extra-source=icons --extra-source=LICENSE
 
 ## Disclaimer
 
